@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Distributeur Parking — Espèces uniquement + Impression ticket vertical</title>
+  <style>
+:root{
+  --bg:#0f1724;
+  --panel:#0b1220;
+  --accent:#ffb703;
+  --muted:#94a3b8;
+  --card:#071025;
+  --success:#16a34a;
+  --danger:#ef4444;
+  --glass: rgba(255,255,255,0.03);
+  font-family: Inter, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:linear-gradient(180deg,#071426 0%, #0b1724 100%);color:#e6eef8}
+.machine{max-width:1100px;margin:24px auto;padding:18px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);box-shadow: 0 8px 30px rgba(2,6,23,0.7)}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+header h1{font-size:20px;margin:0}
+.status{font-size:13px;color:var(--muted)}
+main{display:flex;gap:18px;align-items:flex-start}
+.screen{flex:1;padding:18px;background:var(--panel);border-radius:10px;min-height:520px}
+.printer{width:320px;padding:18px;background:var(--card);border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.btn{padding:10px 14px;border-radius:8px;border:none;background:var(--glass);color:var(--accent);cursor:pointer}
+.btn.primary{background:linear-gradient(90deg,var(--accent), #ff8a00);color:#001217;font-weight:700}
+.btn.warn{background:var(--danger);color:white}
+.btn-row{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+h2{margin:6px 0 4px}
+/* IMPORTANT: hidden utility */
+.hidden{display:none !important}
+.ticket{
+  background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  padding:12px;border-radius:8px;border:1px dashed rgba(255,255,255,0.04);
+  display:flex;flex-direction:column;gap:6px;
+}
+.ticket .code{font-size:22px;color:var(--accent);font-weight:700}
+.ticket .meta{color:var(--muted);font-size:13px;margin-top:6px}
+/* --- Large vertical ticket style --- */
+.ticket.large{
+  width:220px;
+  height:420px;
+  padding:18px;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  background:linear-gradient(180deg,#fff,#f8f8f8);
+  color:#001217;
+  border:2px dashed rgba(0,0,0,0.08);
+}
+.ticket.large .code{font-size:48px;color:#111;font-weight:900;letter-spacing:6px}
+.ticket.large .meta{color:#333;font-size:16px}
+.ticket.large .small{font-size:12px;color:#555}
+/* form inputs */
+input[type="text"], input[type="number"], input[type="password"], select{
+  padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;width:100%;margin-top:8px
+}
+.exit-info{margin-top:10px;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;color:var(--muted)}
+.admin-list{max-height:220px;overflow:auto;background:rgba(255,255,255,0.02);padding:10px;border-radius:6px;color:var(--muted)}
+.printer-slot{width:100%;height:220px;background:linear-gradient(180deg,#071025,#09152b);border-radius:8px;border:1px solid rgba(255,255,255,0.03);position:relative;padding:10px;overflow:auto}
+.receipt{background:#fff;color:#001217;padding:10px;border-radius:6px;font-family:monospace;white-space:pre-line}
+.gate{width:100%;height:60px;background:linear-gradient(180deg,#0b1220,#04111b);border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative}
+.barrier{width:80%;height:8px;background:linear-gradient(90deg,#ef4444,#ffb703);border-radius:4px;transform-origin:left center;transition:transform 700ms cubic-bezier(.2,.9,.3,1)}
+.barrier.open{transform:rotate(-75deg);}
+.footer-note{margin-top:12px;text-align:right;color:var(--muted);font-size:12px}
+.payment-actions{margin-top:12px;background:rgba(255,255,255,0.01);padding:12px;border-radius:8px}
+.small-muted{color:var(--muted);font-size:13px;margin-top:6px}
+/* Modal for admin password */
+.modal-overlay{position:fixed;inset:0;background:rgba(2,6,23,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;}
+.modal{background:var(--panel);padding:18px;border-radius:10px;width:320px;box-shadow:0 8px 30px rgba(0,0,0,0.6);}
+.modal h3{margin:0 0 8px}
+.modal .help{color:var(--muted);font-size:13px;margin-top:6px}
+/* Responsive */
+@media(max-width:900px){
+  main{flex-direction:column}
+  .printer{width:100%}
+  .ticket.large{width:100%;height:360px}
+}
+  </style>
+</head>
+<body>
+  <div class="machine">
+    <header>
+      <h1>Parking Mall - Machine</h1>
+      <p class="status" id="status">Prêt</p>
+    </header>
+
+    <main>
+      <section class="screen" id="screen">
+        <div id="welcome">
+          <h2>Bienvenue</h2>
+          <p>Choisissez une action :</p>
+          <p style="color:var(--muted);margin:6px 0">Tarif actuel: <strong>0.50 $ / seconde</strong></p>
+          <div class="btn-row">
+            <button id="takeTicketBtn" class="btn primary">Prendre un ticket</button>
+            <button id="enterTicketBtn" class="btn">Entrer un ticket / Sortie</button>
+            <button id="adminBtn" class="btn">Admin</button>
+          </div>
+        </div>
+
+        <div id="ticketView" class="hidden">
+          <h2>Ticket généré</h2>
+          <div class="ticket large" id="ticketDisplay" aria-live="polite"></div>
+          <div class="btn-row">
+            <button id="printTicketBtn" class="btn">Imprimer (simulé)</button>
+            <button id="backBtn" class="btn">Retour</button>
+          </div>
+        </div>
+
+        <div id="exitView" class="hidden">
+          <h2>Sortie</h2>
+          <label>Entrez l'identifiant du ticket :</label>
+          <input id="ticketIdInput" placeholder="Ex: 123456" />
+          <div id="exitInfo" class="exit-info"></div>
+          <div class="btn-row">
+            <button id="calcBtn" class="btn primary">Calculer tarif</button>
+            <button id="payBtn" class="btn" disabled>Payer en espèces</button>
+            <button id="backFromExitBtn" class="btn">Retour</button>
+          </div>
+        </div>
+
+        <div id="paymentView" class="hidden">
+          <h2>Paiement en espèces</h2>
+          <div id="paymentSummary" class="small-muted"></div>
+          <div id="cashForm" class="payment-actions">
+            <div><strong>Espèces — choisissez la devise et entrez le montant donné :</strong></div>
+            <label for="cashCurrency">Devise :</label>
+            <select id="cashCurrency">
+              <option value="USD">$ (USD)</option>
+              <option value="LBP">LBP</option>
+            </select>
+            <div id="dueInCurrency" class="small-muted" style="margin-top:8px"></div>
+            <label for="cashGiven">Montant donné :</label>
+            <input id="cashGiven" type="number" min="0" step="any" placeholder="Ex: 10.00" />
+            <div class="btn-row" style="margin-top:10px">
+              <button id="confirmCashBtn" class="btn primary">Valider paiement en espèces</button>
+              <button id="backFromCashBtn" class="btn">Annuler</button>
+            </div>
+            <div id="cashChange" class="small-muted" style="margin-top:8px"></div>
+            <div class="small-muted" style="margin-top:6px">Taux de conversion (configurable en admin) : <span id="fxRateDisplay"></span></div>
+          </div>
+        </div>
+
+        <div id="adminView" class="hidden">
+          <h2>Admin</h2>
+          <p>Liste des tickets enregistrés (localStorage)</p>
+          <pre id="adminList" class="admin-list"></pre>
+          <div style="margin-top:8px">
+            <strong>Paramètres:</strong>
+            <div style="margin-top:6px">
+              <label>Taux LBP par 1 $ :</label>
+              <input id="fxRateInput" type="number" min="1" step="1" style="width:140px" />
+              <button id="saveFxBtn" class="btn">Enregistrer</button>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button id="clearAllBtn" class="btn warn">Effacer tout (dev)</button>
+            <button id="backFromAdminBtn" class="btn">Retour</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="printer" id="printer">
+        <div class="gate" id="gate">
+          <div class="barrier" id="barrier"></div>
+        </div>
+        <div class="printer-slot" id="printerSlot">
+          <div style="color:var(--muted);font-size:13px">Imprimante / Reçus</div>
+        </div>
+        <div class="footer-note">Prototype — non destiné à un usage réel sans validation.</div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Modal Admin Password -->
+  <div id="adminPasswordModal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Accès admin</h3>
+      <div>Entrez le mot de passe pour accéder à l'administration.</div>
+      <input id="adminPasswordInput" type="password" placeholder="Mot de passe" />
+      <div class="btn-row" style="margin-top:10px">
+        <button id="confirmAdminBtn" class="btn primary">Valider</button>
+        <button id="cancelAdminBtn" class="btn">Annuler</button>
+      </div>
+      <div class="help small-muted" id="adminMsg"></div>
+    </div>
+  </div>
+
+  <script>
+/* Espèces uniquement + impression ticket vertical (imprime le #ticketDisplay) */
+const ADMIN_PASSWORD = "9876";
+const TARIFF = { freeSeconds:0, ratePerSecond:0.5, maxDaily:500.0, lostTicketFee:50.0 };
+const DEFAULT_FX = { LBP_per_USD:1500 };
+const STORAGE_KEY = "parking_demo_tickets";
+const FX_STORAGE_KEY = "parking_demo_fx_rate";
+
+const $ = id => document.getElementById(id);
+const now = () => new Date();
+function formatMoney(amount, currency="USD"){
+  if (currency === "USD") return "$" + Number(amount).toFixed(2);
+  if (currency === "LBP") return "LBP " + Math.round(amount).toLocaleString('fr-FR');
+  return String(amount);
+}
+function readFx(){ try { const v = JSON.parse(localStorage.getItem(FX_STORAGE_KEY) || "null"); if (v && typeof v.LBP_per_USD === "number") return v; } catch{} return {...DEFAULT_FX}; }
+function writeFx(obj){ localStorage.setItem(FX_STORAGE_KEY, JSON.stringify(obj)); }
+let FX = readFx();
+
+function readTickets(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; } }
+function writeTickets(o){ localStorage.setItem(STORAGE_KEY, JSON.stringify(o)); }
+
+function generateTicketId(){ return Math.floor(100000 + Math.random()*900000).toString(); }
+function calculateCharge(entryDate, exitDate){
+  if (!entryDate || !exitDate) return {seconds:0, charge:0, detail:"Erreur dates"};
+  const ms = exitDate - entryDate;
+  const seconds = Math.ceil(ms/1000);
+  if (seconds <= TARIFF.freeSeconds) return {seconds, charge:0, detail:"Gratuit (période gratuite)"};
+  const billable = seconds - TARIFF.freeSeconds;
+  let charge = billable * TARIFF.ratePerSecond;
+  if (charge > TARIFF.maxDaily) charge = TARIFF.maxDaily;
+  return {seconds, charge, detail:`${billable} s facturées (après ${TARIFF.freeSeconds} s gratuits)`};
+}
+function convertFromUSD(amountUSD, currency){ if (currency==="USD") return amountUSD; if (currency==="LBP") return amountUSD * FX.LBP_per_USD; return amountUSD; }
+
+const state = {};
+function showScreen(idToShow){
+  ["welcome","ticketView","exitView","paymentView","adminView"].forEach(id=>{
+    const el = $(id); if (!el) return; el.classList.toggle("hidden", id !== idToShow);
+  });
+}
+function setStatus(s){ $("status").textContent = s; }
+
+/* Tickets */
+function takeTicket(){
+  const id = generateTicketId();
+  const entry = now();
+  const tickets = readTickets();
+  tickets[id] = { id, entry: entry.toISOString(), paid:false, paidAt:null, amountPaidUSD:0 };
+  writeTickets(tickets);
+  renderTicket(id);
+  setStatus("Ticket délivré : " + id);
+  showScreen("ticketView");
+}
+function renderTicket(id){
+  const tickets = readTickets();
+  const t = tickets[id];
+  if (!t){ $("ticketDisplay").innerHTML = "<div class='small-muted'>Ticket introuvable</div>"; return; }
+  const entry = new Date(t.entry);
+  $("ticketDisplay").innerHTML = `
+    <div style="text-align:center;width:100%">
+      <div style="font-size:12px;color:#444;margin-bottom:6px">PARKING MALL</div>
+      <div class="code">${t.id}</div>
+      <div class="meta">Entrée</div>
+      <div class="meta" style="font-weight:700">${entry.toLocaleString()}</div>
+      <div class="small" style="margin-top:18px">Gardez votre ticket pour la sortie</div>
+      <div class="small" style="margin-top:10px;color:#666">Merci de votre visite</div>
+    </div>
+  `;
+  // also prepare printer-slot fallback (not used for primary print anymore)
+  $("printerSlot").innerHTML = `<div class="receipt">
+PARKING MALL
+Ticket: ${t.id}
+Entrée: ${entry.toLocaleString()}
+
+Gardez votre ticket.
+</div>`;
+}
+
+function computeForTicketId(id){
+  const tickets = readTickets();
+  const t = tickets[id];
+  if (!t) return { error: "Ticket introuvable" };
+  const entry = new Date(t.entry);
+  const exit = now();
+  const calc = calculateCharge(entry, exit);
+  return { ticket:t, entry, exit, seconds:calc.seconds, amountDueUSD: t.paid ? 0 : calc.charge, detail:calc.detail };
+}
+function onCalcClick(){
+  const id = $("ticketIdInput").value.trim();
+  if (!id){ alert("Entrez l'identifiant du ticket."); return; }
+  const res = computeForTicketId(id);
+  if (res.error){ $("exitInfo").textContent = res.error; $("payBtn").disabled = true; return; }
+  const t = res.ticket;
+  $("exitInfo").innerHTML = `
+    <div><strong>Ticket:</strong> ${t.id}</div>
+    <div><strong>Entrée:</strong> ${res.entry.toLocaleString()}</div>
+    <div><strong>Maintenant:</strong> ${res.exit.toLocaleString()}</div>
+    <div><strong>Durée:</strong> ${res.seconds} s</div>
+    <div><strong>Détails:</strong> ${res.detail}</div>
+    <div><strong>Montant dû (USD):</strong> ${formatMoney(res.amountDueUSD,"USD")}</div>
+    <div><strong>Statut paiement:</strong> ${t.paid ? "Payé" : "Non payé"}</div>
+  `;
+  $("payBtn").disabled = false;
+  state.lastComputed = res;
+  setStatus("Tarif calculé pour " + id);
+}
+
+function openPayment(){
+  if (!state.lastComputed){ alert("Calculez le tarif d'abord."); return; }
+  const due = state.lastComputed.amountDueUSD;
+  $("paymentSummary").innerHTML = `<div><strong>Ticket:</strong> ${state.lastComputed.ticket.id}</div><div><strong>À payer (USD):</strong> ${formatMoney(due,"USD")}</div>`;
+  updateDueInCurrency();
+  showScreen("paymentView");
+}
+function openGate(durationMs=2500){ const barrier = $("barrier"); barrier.classList.add("open"); setTimeout(()=> barrier.classList.remove("open"), durationMs); }
+
+function confirmCashPayment(){
+  const currency = $("cashCurrency").value;
+  const given = parseFloat($("cashGiven").value || "0");
+  if (isNaN(given) || given <= 0){ alert("Entrez un montant valide donné."); return; }
+  if (!state.lastComputed){ alert("Aucun ticket en cours."); return; }
+  const dueUSD = state.lastComputed.amountDueUSD;
+  const dueInCurrency = convertFromUSD(dueUSD, currency);
+  if (given + 1e-9 < dueInCurrency){ alert("Montant insuffisant."); return; }
+  const change = given - dueInCurrency;
+  const ticketId = state.lastComputed.ticket.id;
+  const tickets = readTickets();
+  const t = tickets[ticketId];
+  t.paid = true; t.amountPaidUSD = dueUSD; t.paidAt = now().toISOString(); t.tendered = { currency, given, change };
+  writeTickets(tickets);
+  $("cashChange").textContent = `Montant donné: ${formatMoney(given,currency)} — Monnaie à rendre: ${formatMoney(change,currency)}`;
+  printReceipt(ticketId, dueUSD, `Espèces ${currency}`);
+  setStatus(`Paiement en espèces reçu (${formatMoney(dueInCurrency,currency)} reçu: ${formatMoney(given,currency)})`);
+  openGate();
+  setTimeout(()=> showScreen("welcome"), 900);
+}
+function printReceipt(ticketId, amountUSD, method){
+  const tickets = readTickets(); const t = tickets[ticketId]; const entry = new Date(t.entry); const paidAt = t.paidAt ? new Date(t.paidAt) : new Date();
+  const text = `PARKING MALL - REÇU
+Ticket: ${t.id}
+Entrée: ${entry.toLocaleString()}
+Paiement: ${formatMoney(amountUSD,"USD")}
+Méthode: ${method}
+Date paiement: ${paidAt.toLocaleString()}
+
+Merci et bonne journée.`;
+  $("printerSlot").innerHTML = `<div class="receipt">${text}</div>`;
+}
+
+/* Impression : PRIORITAIREMENT imprime le ticket vertical actuel (#ticketDisplay).
+   Fallback -> imprime printerSlot. */
+function onPrintTicket(){
+  const ticketEl = $("ticketDisplay");
+  let contentHtml = "";
+  if (ticketEl && ticketEl.innerHTML.trim()){
+    // Use ticketDisplay content for print
+    // Surround with ticket.large wrapper and simple print styles
+    contentHtml = `
+      <div class="ticket large">
+        ${ticketEl.innerHTML}
+      </div>
+    `;
+  } else {
+    // fallback to printer slot (ancienne logique)
+    contentHtml = $("printerSlot").innerHTML || `<div style="color:#666">Aucun ticket à imprimer.</div>`;
+  }
+
+  // open print window with minimal styles ensuring vertical ticket looks like on screen
+  const printWindow = window.open('','_blank');
+  if (printWindow){
+    printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Imprimer ticket</title>');
+    printWindow.document.write('<style>');
+    printWindow.document.write('body{font-family:monospace;padding:20px;color:#000;background:#fff}');
+    printWindow.document.write('.ticket.large{width:220px;height:420px;padding:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #ddd;background:#fff;color:#111;margin:0 auto}');
+    printWindow.document.write('.ticket.large .code{font-size:48px;font-weight:900;letter-spacing:6px;margin:6px 0}');
+    printWindow.document.write('.ticket.large .meta{font-size:14px;color:#333;margin:4px 0}');
+    printWindow.document.write('.small{font-size:12px;color:#555;margin-top:10px}');
+    printWindow.document.write('</style>');
+    printWindow.document.write('</head><body>');
+    printWindow.document.write(contentHtml);
+    printWindow.document.write('</body></html>');
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    setStatus('Impression demandée au navigateur (ticket vertical).');
+    setTimeout(()=>{ try{ printWindow.close(); }catch(e){} },800);
+  } else {
+    // popup bloquée -> affichage dans printerSlot
+    $("printerSlot").innerHTML = contentHtml + `<div style="margin-top:8px;color:var(--muted);font-size:12px">Impossible d'ouvrir la fenêtre d'impression (popup bloquée). Utilisez le menu du navigateur -> "Imprimer".</div>`;
+    setStatus('Impression simulée (popup bloquée).');
+  }
+}
+
+/* Admin + utils */
+function renderAdminList(){
+  const tickets = readTickets();
+  const keys = Object.keys(tickets).sort((a,b)=> b.localeCompare(a));
+  if (keys.length === 0){ $("adminList").textContent = "Aucun ticket enregistré."; return; }
+  const lines = keys.map(k=>{
+    const t = tickets[k];
+    return `${t.id} | Entrée: ${new Date(t.entry).toLocaleString()} | Payé: ${t.paid ? "Oui" : "Non"} | Montant payé (USD): ${formatMoney(t.amountPaidUSD,"USD")}${t.paidAt ? " | payé le " + new Date(t.paidAt).toLocaleString() : ""}`;
+  });
+  $("adminList").textContent = lines.join("\n");
+}
+function clearAll(){ if (!confirm("Effacer tous les tickets stockés localement ? (action irréversible)")) return; localStorage.removeItem(STORAGE_KEY); renderAdminList(); setStatus("Données effacées."); }
+function updateDueInCurrency(){ if (!state.lastComputed) return; const dueUSD = state.lastComputed.amountDueUSD; const usdToLbp = convertFromUSD(dueUSD,"LBP"); $("dueInCurrency").textContent = `Montant dû : ${formatMoney(dueUSD,"USD")} = ${formatMoney(usdToLbp,"LBP")}`; $("fxRateDisplay").textContent = FX.LBP_per_USD; }
+
+/* Admin modal */
+function openAdminModal(){ $("adminMsg").textContent=""; $("adminPasswordInput").value=""; $("adminPasswordModal").classList.remove("hidden"); $("adminPasswordModal").setAttribute("aria-hidden","false"); setTimeout(()=> $("adminPasswordInput").focus(),50); }
+function closeAdminModal(){ $("adminPasswordModal").classList.add("hidden"); $("adminPasswordModal").setAttribute("aria-hidden","true"); $("adminMsg").textContent=""; }
+function confirmAdmin(){ const val = $("adminPasswordInput").value || ""; if (val === ADMIN_PASSWORD){ closeAdminModal(); renderAdminList(); $("fxRateInput").value = FX.LBP_per_USD; showScreen("adminView"); setStatus("Mode admin (authentifié)"); } else { $("adminMsg").textContent = "Mot de passe incorrect."; $("adminPasswordInput").value=""; $("adminPasswordInput").focus(); } }
+
+window.addEventListener("DOMContentLoaded", ()=>{
+  // bind
+  $("takeTicketBtn").addEventListener("click", takeTicket);
+  $("enterTicketBtn").addEventListener("click", ()=>{ showScreen("exitView"); setStatus("Entrée du ticket / sortie"); });
+  $("adminBtn").addEventListener("click", openAdminModal);
+  $("backBtn").addEventListener("click", ()=>{ showScreen("welcome"); setStatus("Prêt"); });
+  $("calcBtn").addEventListener("click", onCalcClick);
+  $("payBtn").addEventListener("click", openPayment);
+  $("backFromExitBtn").addEventListener("click", ()=>{ showScreen("welcome"); setStatus("Prêt"); });
+
+  // cash flow
+  $("confirmCashBtn").addEventListener("click", confirmCashPayment);
+  $("backFromCashBtn").addEventListener("click", ()=>{ showScreen("exitView"); setStatus("Paiement annulé"); $("cashChange").textContent=""; });
+  $("cashCurrency").addEventListener("change", updateDueInCurrency);
+  $("cashGiven").addEventListener("input", ()=>{
+    if (!state.lastComputed) return;
+    const currency = $("cashCurrency").value;
+    const given = parseFloat($("cashGiven").value || "0");
+    const dueInCurrency = convertFromUSD(state.lastComputed.amountDueUSD, currency);
+    if (isNaN(given) || given <= 0) { $("cashChange").textContent = ""; return; }
+    const change = given - dueInCurrency;
+    if (change < 0) { $("cashChange").textContent = `Montant insuffisant — il manque ${formatMoney(Math.abs(change),currency)}`; }
+    else { $("cashChange").textContent = `Monnaie à rendre: ${formatMoney(change,currency)}`; }
+  });
+
+  // admin modal
+  $("confirmAdminBtn").addEventListener("click", confirmAdmin);
+  $("cancelAdminBtn").addEventListener("click", closeAdminModal);
+  $("adminPasswordInput").addEventListener("keydown", (e)=>{ if (e.key === "Enter") confirmAdmin(); if (e.key === "Escape") closeAdminModal(); });
+
+  // admin view
+  $("clearAllBtn").addEventListener("click", clearAll);
+  $("backFromAdminBtn").addEventListener("click", ()=>{ showScreen("welcome"); setStatus("Prêt"); });
+  $("saveFxBtn").addEventListener("click", ()=>{
+    const v = parseInt($("fxRateInput").value || "0",10);
+    if (!v || v <= 0){ alert("Entrez un taux LBP valide."); return; }
+    FX.LBP_per_USD = v; writeFx(FX); $("fxRateDisplay").textContent = v; setStatus("Taux de change enregistré.");
+  });
+
+  // printing
+  $("printTicketBtn").addEventListener("click", onPrintTicket);
+
+  // shortcuts
+  $("ticketIdInput").addEventListener("keydown", (e)=>{ if (e.key === "Enter") onCalcClick(); });
+
+  $("printerSlot").innerHTML = `<div style="color:var(--muted);font-size:13px">Imprimante prête.</div>`;
+  setStatus("Prêt");
+  const fxEl = $("fxRateDisplay"); if (fxEl) fxEl.textContent = FX.LBP_per_USD;
+});
+  </script>
+</body>
+</html>
